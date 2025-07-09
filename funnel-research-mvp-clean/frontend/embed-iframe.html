@@ -1,0 +1,553 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Funnel Research Tool - Embed</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=Figtree:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="./design-system.css">
+    <meta http-equiv="Content-Security-Policy" content="frame-ancestors *;">
+</head>
+<body>
+    <div class="container">
+        <div id="funnel-research-root"></div>
+    </div>
+
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+
+    <script>
+        const { useState, useEffect } = React;
+
+        // IMPORTANT: Update this URL with your deployed API
+        const API_URL = new URLSearchParams(window.location.search).get('api_url') || 
+                        'https://your-api.railway.app/api/v1';
+
+        const FunnelResearchEmbedded = () => {
+            const [currentStep, setCurrentStep] = useState(1);
+            const [isAnalyzing, setIsAnalyzing] = useState(false);
+            const [analysisId, setAnalysisId] = useState(null);
+            const [analysisResult, setAnalysisResult] = useState(null);
+            const [error, setError] = useState(null);
+
+            // Form state
+            const [serviceInput, setServiceInput] = useState({
+                description: '',
+                core_service: '',
+                target_audience: '',
+                location: ''
+            });
+
+            const [keywordInput, setKeywordInput] = useState({
+                core_phrase: '',
+                include_local: true,
+                location: ''
+            });
+
+            const steps = [
+                { id: 1, title: 'Service Input', icon: '🎯' },
+                { id: 2, title: 'Keyword Research', icon: '🔍' },
+                { id: 3, title: 'Competitor Analysis', icon: '📊' },
+                { id: 4, title: 'Strategy Output', icon: '🚀' }
+            ];
+
+            const startAnalysis = async () => {
+                try {
+                    setIsAnalyzing(true);
+                    setError(null);
+
+                    const response = await fetch(`${API_URL}/funnel-analysis`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            service_input: serviceInput,
+                            keyword_input: keywordInput,
+                            competitor_request: {
+                                core_phrase: keywordInput.core_phrase,
+                                location: keywordInput.location,
+                                include_national: true,
+                                include_local: keywordInput.include_local,
+                                max_competitors: 5
+                            }
+                        }),
+                    });
+
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+
+                    const data = await response.json();
+                    
+                    if (data.success) {
+                        setAnalysisId(data.analysis_id);
+                        setCurrentStep(3);
+                        pollForResults(data.analysis_id);
+                    } else {
+                        throw new Error(data.message);
+                    }
+                } catch (err) {
+                    setError(err.message);
+                    setIsAnalyzing(false);
+                }
+            };
+
+            const pollForResults = async (id) => {
+                const poll = async () => {
+                    try {
+                        const response = await fetch(`${API_URL}/funnel-analysis/${id}`);
+                        const data = await response.json();
+                        
+                        if (data.status === 'completed' && data.data) {
+                            setAnalysisResult(data.data);
+                            setCurrentStep(4);
+                            setIsAnalyzing(false);
+                            
+                            // Notify parent window
+                            if (window.parent) {
+                                window.parent.postMessage({
+                                    type: 'funnel_research_complete',
+                                    data: data.data
+                                }, '*');
+                            }
+                        } else if (data.status === 'failed') {
+                            throw new Error('Analysis failed');
+                        } else {
+                            setTimeout(poll, 3000);
+                        }
+                    } catch (err) {
+                        setError(err.message);
+                        setIsAnalyzing(false);
+                    }
+                };
+
+                poll();
+            };
+
+            const isStep1Valid = serviceInput.description.length >= 10 && serviceInput.core_service.length >= 2;
+            const isStep2Valid = keywordInput.core_phrase.length >= 2;
+
+            return React.createElement('div', { className: 'funnel-research-embed' }, [
+                // Header
+                React.createElement('div', { 
+                    key: 'header',
+                    className: 'text-center',
+                    style: { marginBottom: 'var(--spacing-2xl)' }
+                }, [
+                    React.createElement('h1', {
+                        key: 'title',
+                        className: 'heading-large'
+                    }, 'Funnel Research & Strategy'),
+                    React.createElement('p', {
+                        key: 'subtitle',
+                        className: 'text-body'
+                    }, 'Analyze competitors, identify opportunities, and build your content strategy')
+                ]),
+
+                // Progress indicator
+                React.createElement('div', {
+                    key: 'progress',
+                    className: 'progress-container'
+                }, steps.map((step, index) => [
+                    React.createElement('div', {
+                        key: `step-${step.id}`,
+                        className: 'progress-step'
+                    }, [
+                        React.createElement('div', {
+                            key: 'circle',
+                            className: `progress-circle ${
+                                currentStep === step.id ? 'active' : 
+                                currentStep > step.id ? 'completed' : ''
+                            }`
+                        }, currentStep > step.id ? '✓' : step.icon),
+                        React.createElement('span', {
+                            key: 'label',
+                            className: `progress-label ${
+                                currentStep === step.id ? 'active' : 
+                                currentStep > step.id ? 'completed' : ''
+                            }`
+                        }, step.title)
+                    ]),
+                    index < steps.length - 1 ? React.createElement('div', {
+                        key: `line-${step.id}`,
+                        className: `progress-line ${currentStep > step.id ? 'completed' : ''}`
+                    }) : null
+                ]).flat().filter(Boolean)),
+
+                // Error display
+                error ? React.createElement('div', {
+                    key: 'error',
+                    className: 'card',
+                    style: { 
+                        background: 'rgba(239, 68, 68, 0.1)', 
+                        borderColor: '#ef4444',
+                        marginBottom: 'var(--spacing-lg)' 
+                    }
+                }, React.createElement('p', {
+                    style: { color: '#ef4444', margin: 0 }
+                }, `Error: ${error}`)) : null,
+
+                // Step content
+                currentStep === 1 ? React.createElement(Step1Component, {
+                    key: 'step1',
+                    serviceInput,
+                    setServiceInput,
+                    isValid: isStep1Valid,
+                    onNext: () => setCurrentStep(2)
+                }) : null,
+
+                currentStep === 2 ? React.createElement(Step2Component, {
+                    key: 'step2',
+                    keywordInput,
+                    setKeywordInput,
+                    isValid: isStep2Valid,
+                    isAnalyzing,
+                    onBack: () => setCurrentStep(1),
+                    onStart: startAnalysis
+                }) : null,
+
+                currentStep === 3 ? React.createElement(Step3Component, {
+                    key: 'step3'
+                }) : null,
+
+                currentStep === 4 && analysisResult ? React.createElement(Step4Component, {
+                    key: 'step4',
+                    analysisResult
+                }) : null
+            ].filter(Boolean));
+        };
+
+        const Step1Component = ({ serviceInput, setServiceInput, isValid, onNext }) => {
+            return React.createElement('div', { className: 'card fade-in' }, [
+                React.createElement('h2', {
+                    key: 'title',
+                    className: 'heading-medium'
+                }, '🎯 Define Your Core Service'),
+
+                React.createElement('div', { key: 'description-group', className: 'form-group' }, [
+                    React.createElement('label', { key: 'label', className: 'form-label' }, 
+                        'Describe your core product/service and target audience:'),
+                    React.createElement('textarea', {
+                        key: 'input',
+                        className: 'form-input form-textarea',
+                        value: serviceInput.description,
+                        onChange: (e) => setServiceInput(prev => ({ ...prev, description: e.target.value })),
+                        placeholder: 'Example: I provide digital marketing services for local restaurants to help them increase online orders...'
+                    })
+                ]),
+
+                React.createElement('div', { key: 'service-group', className: 'form-group' }, [
+                    React.createElement('label', { key: 'label', className: 'form-label' },
+                        'What is your core service in 2-4 words?'),
+                    React.createElement('input', {
+                        key: 'input',
+                        type: 'text',
+                        className: 'form-input',
+                        value: serviceInput.core_service,
+                        onChange: (e) => setServiceInput(prev => ({ ...prev, core_service: e.target.value })),
+                        placeholder: 'Example: Restaurant Digital Marketing'
+                    })
+                ]),
+
+                React.createElement('div', {
+                    key: 'optional-grid',
+                    className: 'grid grid-2'
+                }, [
+                    React.createElement('div', { key: 'audience-group', className: 'form-group' }, [
+                        React.createElement('label', { key: 'label', className: 'form-label' }, 'Target Audience (Optional)'),
+                        React.createElement('input', {
+                            key: 'input',
+                            type: 'text',
+                            className: 'form-input',
+                            value: serviceInput.target_audience,
+                            onChange: (e) => setServiceInput(prev => ({ ...prev, target_audience: e.target.value })),
+                            placeholder: 'Local restaurants, small businesses...'
+                        })
+                    ]),
+                    React.createElement('div', { key: 'location-group', className: 'form-group' }, [
+                        React.createElement('label', { key: 'label', className: 'form-label' }, 'Primary Location (Optional)'),
+                        React.createElement('input', {
+                            key: 'input',
+                            type: 'text',
+                            className: 'form-input',
+                            value: serviceInput.location,
+                            onChange: (e) => setServiceInput(prev => ({ ...prev, location: e.target.value })),
+                            placeholder: 'Chicago, IL'
+                        })
+                    ])
+                ]),
+
+                React.createElement('button', {
+                    key: 'next-btn',
+                    className: 'btn btn-primary',
+                    onClick: onNext,
+                    disabled: !isValid,
+                    style: { width: '100%' }
+                }, 'Continue to Keyword Research →')
+            ]);
+        };
+
+        const Step2Component = ({ keywordInput, setKeywordInput, isValid, isAnalyzing, onBack, onStart }) => {
+            return React.createElement('div', { className: 'card fade-in' }, [
+                React.createElement('h2', {
+                    key: 'title',
+                    className: 'heading-medium'
+                }, '🔍 Keyword Research'),
+
+                React.createElement('div', {
+                    key: 'tools-info',
+                    className: 'card',
+                    style: { background: 'rgba(41, 223, 28, 0.1)', marginBottom: 'var(--spacing-lg)' }
+                }, [
+                    React.createElement('h3', {
+                        key: 'tools-title',
+                        className: 'heading-small text-accent'
+                    }, 'Free Tools Integration'),
+                    React.createElement('ul', {
+                        key: 'tools-list',
+                        className: 'text-body',
+                        style: { margin: 0, paddingLeft: 'var(--spacing-lg)' }
+                    }, [
+                        'Google Keyword Planner',
+                        'Google Trends',
+                        'Answer The Public',
+                        'Ubersuggest',
+                        'Keywords Everywhere'
+                    ].map((tool, index) => React.createElement('li', { key: index }, tool)))
+                ]),
+
+                React.createElement('div', { key: 'phrase-group', className: 'form-group' }, [
+                    React.createElement('label', { key: 'label', className: 'form-label' },
+                        'Enter your core keyword phrase (3 words max):'),
+                    React.createElement('input', {
+                        key: 'input',
+                        type: 'text',
+                        className: 'form-input',
+                        value: keywordInput.core_phrase,
+                        onChange: (e) => setKeywordInput(prev => ({ ...prev, core_phrase: e.target.value })),
+                        placeholder: 'Example: restaurant marketing services'
+                    })
+                ]),
+
+                React.createElement('div', {
+                    key: 'options-grid',
+                    className: 'grid grid-2'
+                }, [
+                    React.createElement('div', { key: 'local-group', className: 'form-group' }, [
+                        React.createElement('label', { key: 'label', className: 'form-label' }, [
+                            React.createElement('input', {
+                                key: 'checkbox',
+                                type: 'checkbox',
+                                checked: keywordInput.include_local,
+                                onChange: (e) => setKeywordInput(prev => ({ ...prev, include_local: e.target.checked })),
+                                style: { marginRight: 'var(--spacing-sm)' }
+                            }),
+                            'Include local keyword analysis'
+                        ])
+                    ]),
+                    React.createElement('div', { key: 'location-group', className: 'form-group' }, [
+                        React.createElement('label', { key: 'label', className: 'form-label' }, 'Location'),
+                        React.createElement('input', {
+                            key: 'input',
+                            type: 'text',
+                            className: 'form-input',
+                            value: keywordInput.location,
+                            onChange: (e) => setKeywordInput(prev => ({ ...prev, location: e.target.value })),
+                            placeholder: 'Chicago',
+                            disabled: !keywordInput.include_local
+                        })
+                    ])
+                ]),
+
+                React.createElement('div', {
+                    key: 'buttons',
+                    className: 'flex gap-lg'
+                }, [
+                    React.createElement('button', {
+                        key: 'back',
+                        className: 'btn btn-secondary',
+                        onClick: onBack,
+                        style: { flex: 1 }
+                    }, '← Back'),
+                    React.createElement('button', {
+                        key: 'start',
+                        className: 'btn btn-primary',
+                        onClick: onStart,
+                        disabled: !isValid || isAnalyzing,
+                        style: { flex: 1 }
+                    }, isAnalyzing ? 'Starting...' : 'Start Analysis →')
+                ])
+            ]);
+        };
+
+        const Step3Component = () => {
+            return React.createElement('div', { className: 'card fade-in text-center' }, [
+                React.createElement('h2', {
+                    key: 'title',
+                    className: 'heading-medium'
+                }, '📊 Analyzing Your Market'),
+
+                React.createElement('div', {
+                    key: 'spinner',
+                    className: 'loading-spinner',
+                    style: { margin: '0 auto var(--spacing-lg)' }
+                }),
+
+                React.createElement('div', {
+                    key: 'status',
+                    className: 'text-body'
+                }, 'Analysis in Progress...'),
+
+                React.createElement('p', {
+                    key: 'timing',
+                    className: 'text-body',
+                    style: { marginTop: 'var(--spacing-lg)' }
+                }, "This typically takes 30-60 seconds. We'll show your results automatically.")
+            ]);
+        };
+
+        const Step4Component = ({ analysisResult }) => {
+            return React.createElement('div', { className: 'fade-in' }, [
+                React.createElement('div', { key: 'results', className: 'card' }, [
+                    React.createElement('h2', {
+                        key: 'title',
+                        className: 'heading-medium text-center'
+                    }, '🚀 Your Funnel Strategy'),
+
+                    React.createElement('div', {
+                        key: 'summary',
+                        className: 'grid grid-3',
+                        style: { marginBottom: 'var(--spacing-2xl)' }
+                    }, [
+                        React.createElement('div', {
+                            key: 'service',
+                            className: 'card',
+                            style: { background: 'rgba(41, 223, 28, 0.1)' }
+                        }, [
+                            React.createElement('h3', {
+                                key: 'title',
+                                className: 'heading-small text-accent'
+                            }, 'Core Service'),
+                            React.createElement('p', {
+                                key: 'value',
+                                className: 'text-body'
+                            }, analysisResult.core_service)
+                        ]),
+                        React.createElement('div', {
+                            key: 'phrase',
+                            className: 'card',
+                            style: { background: 'rgba(41, 223, 28, 0.1)' }
+                        }, [
+                            React.createElement('h3', {
+                                key: 'title',
+                                className: 'heading-small text-accent'
+                            }, 'Core Phrase'),
+                            React.createElement('p', {
+                                key: 'value',
+                                className: 'text-body'
+                            }, analysisResult.core_phrase)
+                        ]),
+                        React.createElement('div', {
+                            key: 'volume',
+                            className: 'card',
+                            style: { background: 'rgba(41, 223, 28, 0.1)' }
+                        }, [
+                            React.createElement('h3', {
+                                key: 'title',
+                                className: 'heading-small text-accent'
+                            }, 'Search Volume'),
+                            React.createElement('p', {
+                                key: 'value',
+                                className: 'text-body'
+                            }, analysisResult.insights.search_volume)
+                        ])
+                    ]),
+
+                    React.createElement('div', {
+                        key: 'competitors',
+                        style: { marginBottom: 'var(--spacing-2xl)' }
+                    }, [
+                        React.createElement('h3', {
+                            key: 'title',
+                            className: 'heading-medium'
+                        }, '🏆 Competitor Analysis'),
+                        React.createElement('div', {
+                            key: 'stats',
+                            className: 'grid grid-2'
+                        }, [
+                            React.createElement('div', { key: 'national', className: 'card' }, [
+                                React.createElement('h4', {
+                                    key: 'title',
+                                    className: 'heading-small text-accent'
+                                }, `🌍 National Competitors (${analysisResult.national_competitors.length})`),
+                                React.createElement('p', {
+                                    key: 'desc',
+                                    className: 'text-body'
+                                }, 'High authority competitors with $25k+ monthly ad spend')
+                            ]),
+                            React.createElement('div', { key: 'local', className: 'card' }, [
+                                React.createElement('h4', {
+                                    key: 'title',
+                                    className: 'heading-small text-accent'
+                                }, `📍 Local Competitors (${analysisResult.local_competitors.length})`),
+                                React.createElement('p', {
+                                    key: 'desc',
+                                    className: 'text-body'
+                                }, 'Local-focused competitors with strong GBP optimization')
+                            ])
+                        ])
+                    ]),
+
+                    React.createElement('div', {
+                        key: 'insights'
+                    }, [
+                        React.createElement('h3', {
+                            key: 'title',
+                            className: 'heading-medium'
+                        }, '💡 Key Insights'),
+                        React.createElement('div', {
+                            key: 'patterns',
+                            className: 'card',
+                            style: { background: 'rgba(41, 223, 28, 0.1)' }
+                        }, [
+                            React.createElement('h4', {
+                                key: 'patterns-title',
+                                className: 'heading-small'
+                            }, 'Top Patterns:'),
+                            React.createElement('ul', {
+                                key: 'patterns-list',
+                                className: 'text-body'
+                            }, analysisResult.insights.ranking_patterns.slice(0, 3).map((pattern, index) =>
+                                React.createElement('li', { key: index }, pattern)
+                            ))
+                        ])
+                    ])
+                ]),
+
+                React.createElement('div', {
+                    key: 'cta',
+                    className: 'card text-center',
+                    style: { 
+                        background: 'linear-gradient(135deg, var(--primary-green) 0%, var(--accent-purple) 100%)',
+                        color: 'var(--primary-black)'
+                    }
+                }, [
+                    React.createElement('h2', {
+                        key: 'title',
+                        className: 'heading-medium'
+                    }, 'Strategy Complete! 🎉'),
+                    React.createElement('p', {
+                        key: 'desc',
+                        className: 'text-body'
+                    }, `Found ${analysisResult.assets_gathered.total_assets} competitor assets and ${analysisResult.insights.ranking_patterns.length} key insights for your funnel strategy.`)
+                ])
+            ]);
+        };
+
+        ReactDOM.render(React.createElement(FunnelResearchEmbedded), document.getElementById('funnel-research-root'));
+    </script>
+</body>
+</html>
